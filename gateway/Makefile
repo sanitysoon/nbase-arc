@@ -21,6 +21,7 @@ CFLAGS += -Wmissing-field-initializers
 CFLAGS += -Wno-unknown-pragmas
 CFLAGS += -Wstrict-prototypes
 CFLAGS += -Wold-style-definition
+CFLAGS += -Wimplicit-fallthrough=0
 
 DEFS=-D_REENTRANT -D_GNU_SOURCE -DUSE_JEMALLOC
 OPT=-O3
