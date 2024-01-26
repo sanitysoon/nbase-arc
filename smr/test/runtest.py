@@ -56,7 +56,7 @@ cwd = os.getcwd()
 try:
     os.chdir('integrated')
     for test in integrated_tests:
-        cmd = 'python %s' % test
+        cmd = 'python2 %s' % test
         ret = os.system(cmd)
         if ret == 0:
             print 'test %s passed'  % test

@@ -50,7 +50,7 @@ class TestBeRetry (unittest.TestCase):
                 info = M.smr.info()
                 #print (info)
                 assert (('client' in info) and not ('client_1' in info['client']))
-                time.sleep(1.0)
+                time.sleep(2.0)
                 info = M.smr.info()
                 #print (info)
                 assert (('client' in info) and ('client_1' in info['client']))

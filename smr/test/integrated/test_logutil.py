@@ -15,8 +15,11 @@
 #
 
 import unittest
+import subprocess
+import shlex
+import os
 import time
-import Util, Cm, Pg, Pgs, Smr, Client, Log
+import Conf, Util, Cm, Pg, Pgs, Smr, Client, Log
 
 class TestLogUtil (unittest.TestCase):
 
@@ -34,15 +37,77 @@ class TestLogUtil (unittest.TestCase):
         for C in clients:
             C.start(C.slotid)
 
+        checked_seqs = []
         while True:
             time.sleep(1)
             seqs = pgs.smr.getseq_log()
             max_seq = seqs['max']
+            checked_seqs.append(max_seq)
             if max_seq / (64*1024*1024) >= log_count:
                 break
 
         for C in clients:
             C.stop(C.slotid)
+        return checked_seqs
+
+    def test_copylog(self):
+        src = None
+        dst = None
+        master = None
+        try:
+            src = Cm.CM("test_logcopy_src")
+            src.create_workspace()
+            pg = Pg.PG(0)
+
+            master = Pgs.PGS(0, 'localhost', 1900, src.dir)
+            pg.join(master, start=True)
+            master.smr.wait_role(Smr.SMR.MASTER)
+
+
+            # make some logs
+            seqs = self.make_logs(master, 2)
+            assert len(seqs) > 0, seqs
+
+            # do copylog
+            dst = Cm.CM("test_logcopy_dst")
+            dst.create_workspace()
+
+            prog = Conf.LOG_UTIL_BIN_PATH
+            cmd = '%s copylog %s %s 0 %d' % (prog, master.dir, dst.dir, seqs[-1])
+            popen = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            sout, serr = popen.communicate()
+            assert (popen.returncode == 0), (sout, serr)
+
+            # check files
+            seq = 0
+            to_seq = int(seqs[-1])
+            while seq < to_seq:
+                # e.g.) 0000000000000000100.log
+                fn = "%019d.log" % seq
+                sf = os.path.join(master.dir, fn)
+                df = os.path.join(dst.dir, fn)
+
+                if to_seq - seq > 64*1024*1024:
+                    n = 64*1024*1024
+                else:
+                    n = to_seq - seq
+
+                cmd = 'cmp -n %d %s %s' % (n, sf, df)
+                popen = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                sout, serr = popen.communicate()
+                assert (popen.returncode == 0), (sout, serr)
+
+                # get log file name from seq
+                seq = seq + 64*1024*1024
+        finally:
+            # Util.tstop('Check output!')
+            if master is not None:
+                master.kill_smr()
+                master.kill_be()
+            if src is not None:
+                src.remove_workspace()
+            if dst is not None:
+                dst.remove_workspace()
 
     def test_logutil(self):
         cm = None

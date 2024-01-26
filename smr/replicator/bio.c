@@ -361,7 +361,8 @@ del_proc (bioState * bs)
    *
    * - target_seq < rep->be_ckpt_seq
    * - target_seq < decache base seq (fadvised)
-   * - log file is older than rep->log_delete_gap (1 day by default)
+   * - target_seq < estimated minimum seq calculated based on clients (be, replica, migrator)
+   * - log file is older than rep->log_delete_gap (1h by default)
    *   or (inclusive) file seqence is less than rep->log_delete_seq
    */
   retain_lb = aseq_get (&rep->log_delete_seq);

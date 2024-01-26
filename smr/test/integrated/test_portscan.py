@@ -16,6 +16,7 @@
 
 import unittest
 import time
+import socket
 import Cm, Pg, Pgs, Smr, Conn, Util
 
 class TestPortScan (unittest.TestCase):
@@ -35,9 +36,9 @@ class TestPortScan (unittest.TestCase):
         if et - st > 1.0:
             raise Exception("10 connection try exceeds 1.0 sec.")
 
-    def test_logdelete(self):
+    def test_portscan(self):
         cm = None
-        pgs1 = None
+        pgs = None
         try:
             cm = Cm.CM("test_portscan")
             cm.create_workspace()
@@ -74,6 +75,109 @@ class TestPortScan (unittest.TestCase):
                 conns.append(conn)
             self._check_conn_blocked()
 
+        finally:
+            if pgs is not None:
+                pgs.kill_smr()
+                pgs.kill_be()
+            if cm is not None:
+                cm.remove_workspace()
+
+    def make_sock(self, host, port):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.settimeout(10)
+        sock.connect((host, port))
+        return sock
+
+    def local_handshake(self, host, port):
+        seq = b'\x00\x00\x00\x00\x00\x00\x00\x00'
+        timeout = 1.0
+        st = time.time()
+        sock = self.make_sock(host, port)
+        try:
+            sock.settimeout(timeout+0.1)
+            sock.sendall(seq)
+            d = sock.recv(1)
+            sock.close()
+            if len(d) == 0:
+                return False
+            return True
+        except Exception as e:
+            sock.close()
+            et = time.time()
+            if et-st > timeout:
+                return True
+            return False
+
+    def client_handshake(self, host, port, nid):
+        sock = self.make_sock(host, port)
+        timeout = 1.0
+        try:
+            sock.settimeout(timeout+0.1)
+            sock.sendall(nid)
+            d = sock.recv(8) # committed seq
+            sock.close()
+            if len(d) == 8:
+                return True
+            return False
+        except Exception as e:
+            sock.close()
+            return False
+
+    def test_portscan2(self):
+        cm = None
+        pgs = None
+        myip = socket.gethostbyname(socket.gethostname())
+        try:
+            cm = Cm.CM("test_portscan2")
+            cm.create_workspace()
+            pg = Pg.PG(0)
+
+            pgs = Pgs.PGS(0, 'localhost', 1900, cm.dir)
+            pgs.start_smr()
+            pgs.smr.wait_role(Smr.SMR.NONE)
+
+            # ****NONE here
+            # local connection ok case
+            ok = self.local_handshake("localhost", 1900)
+            assert ok, ok
+            # local connection bad case (immediate failure)
+            ok = self.local_handshake(myip, 1900)
+            assert not ok, ok
+            time.sleep(1.6) # this line matters (SMR_ACCEPT_BLOCK_MSEC 1500)
+
+            pgs.start_be()
+            pgs.smr.wait_role(Smr.SMR.LCONN)
+
+            # ****LCONN here
+            pg.join(pgs, start = False)
+
+            # ****MASTER here
+            # sc: myip, cc: local loopback
+            sc = None
+            try:
+                # make slave connection
+                sc = self.make_sock(myip, 1902)
+                sc.settimeout(1.0)
+                min_seq = sc.recv(8)
+                assert len(min_seq) == 8, min_seq
+                commit_seq = sc.recv(8)
+                assert len(commit_seq) == 8, commit_seq
+                max_seq = sc.recv(8)
+                assert len(max_seq) == 8, max_seq
+                sc.sendall(b'\x00\x01')
+                sc.sendall(b'\x00\x00\x00\x00\x00\x00\x00\x00')
+                time.sleep(0.1)
+            except Exception as e:
+                if sc != None:
+                    sc.close()
+                    sc = None
+            assert sc != None, sc
+
+            ok = self.client_handshake("localhost", 1901, b'\x00\x01')
+            assert not ok, ok
+            sc.close()
+            time.sleep(1.6) # this line matters (SMR_ACCEPT_BLOCK_MSEC 1500)
         finally:
             if pgs is not None:
                 pgs.kill_smr()

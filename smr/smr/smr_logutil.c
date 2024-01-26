@@ -65,6 +65,7 @@ static void release_addr (void *addr);
 static void verify_checksum (int argc, char *argv[]);
 static void mincorelog (int argc, char *argv[]);
 static void decachelog (int argc, char *argv[]);
+static void copylog (int argc, char *argv[]);
 static void print_raw (unsigned char *buf, int len);
 static void print_logdata (long long seq, long long timestamp,
 			   int hash, unsigned char *buf, int size);
@@ -109,6 +110,8 @@ static const char *_usage =
   "  decachelog <log_dir> <seq> [force]                                       \n"
   "    - decache log file pages upto <seq> from os                            \n"
   "    - last two log files are not decached unless 'force' option is set     \n"
+  "  copylog <src_log_dir> <dest_log_dir> <from_seq> <to_seq>                 \n"
+  "    - copy log files containing [from_seq, to_seq)                         \n"
   "  = MEMORY LOG RELATED =                                                   \n"
   "  createlog <log_dir>                                                      \n"
   "      create master log in the <log_dir> for share memory logging          \n"
@@ -765,6 +768,156 @@ done:
     }
 }
 
+static void
+copylog (int argc, char *argv[])
+{
+  char *src_dir, src_dir_buf[PATH_MAX];
+  char *dst_dir, dst_dir_buf[PATH_MAX];
+  smrLog *src = NULL, *dst = NULL;
+  smrLogAddr *sf = NULL, *df = NULL;
+  long long from_seq = 0LL, to_seq = 0LL, seq;
+  int ret, exit_code;
+
+  // check arguemsnts
+  if (argc != 4)
+    {
+      printf ("copylog <src_log_dir> <dest_log_dir> <from_seq> <to_seq>\n");
+      exit (1);
+    }
+  src_dir = realpath (argv[0], src_dir_buf);
+  if (src_dir == NULL)
+    {
+      printf ("failed to resolve <src_log_dir>:%s\n", argv[0]);
+      exit (1);
+    }
+  dst_dir = realpath (argv[1], dst_dir_buf);
+  if (dst_dir == NULL)
+    {
+      printf ("failed to resolve <dst_log_dir>:%s\n", argv[1]);
+      exit (1);
+    }
+  ret = parse_ll (argv[2], &from_seq);
+  if (ret < 0)
+    {
+      printf ("bad <from_seq>\n");
+      exit (1);
+    }
+  ret = parse_ll (argv[3], &to_seq);
+  if (ret < 0)
+    {
+      printf ("bad <to_seq>\n");
+      exit (1);
+    }
+  if (from_seq < 0 || from_seq >= to_seq)
+    {
+      printf ("bad sequences. from:%lld, to:%lld\n", from_seq, to_seq);
+      exit (1);
+    }
+
+  // make src, dst smrLog
+  // from now on goto error when failure occurred
+  exit_code = 1;
+  src = smrlog_init (src_dir);
+  if (src == NULL)
+    {
+      printf ("failed to open src log dir: %s\n", src_dir);
+      goto error;
+    }
+  dst = smrlog_init (dst_dir);
+  if (dst == NULL)
+    {
+      printf ("failed to open dst log dir: %s\n", dst_dir);
+      goto error;
+    }
+
+  for (seq = seq_round_down (from_seq); seq < to_seq;
+       seq += SMR_LOG_FILE_DATA_SIZE)
+    {
+      char *buf;
+      int nw, avail = 0;
+      int can_finalize;
+
+      sf = smrlog_read_mmap (src, seq);
+      if (sf == NULL)
+	{
+	  printf ("failed to open src log file for seq: %lld\n", seq);
+	  goto error;
+	}
+      df = smrlog_write_mmap (dst, seq, 1);
+      if (df == NULL)
+	{
+	  printf ("failed to open dst log file for seq: %lld\n", seq);
+	  goto error;
+	}
+
+      // copy
+      if (to_seq - seq > SMR_LOG_FILE_DATA_SIZE)
+	{
+	  nw = SMR_LOG_FILE_DATA_SIZE;
+	  can_finalize = 1;
+	}
+      else
+	{
+	  nw = (int) (to_seq - seq);
+	  can_finalize = 0;
+	}
+
+      ret = smrlog_get_buf (dst, df, &buf, &avail);
+      if (ret < 0)
+	{
+	  printf ("failed to get buf from dst file for seq: %lld\n", seq);
+	  goto error;
+	}
+      assert (avail >= nw);
+
+      memcpy (buf, sf->addr, nw);
+      ret = smrlog_append (dst, df, buf, nw);
+      if (ret != nw)
+	{
+	  printf ("log append failed nw:%d ret:%d\n", nw, ret);
+	  goto error;
+	}
+      ret = smrlog_sync (dst, df);
+      if (ret < 0)
+	{
+	  printf ("failed to sync dst file. ret:%d\n", ret);
+	  goto error;
+	}
+      if (can_finalize && smrlog_is_finalized (src, sf))
+	{
+	  ret = smrlog_finalize (dst, df);
+	  if (ret < 0)
+	    {
+	      printf ("failed to finalize dst file. ret:%d\n", ret);
+	      goto error;
+	    }
+	}
+      smrlog_munmap (src, sf);
+      smrlog_munmap (dst, df);
+      sf = df = NULL;
+    }
+
+  exit_code = 0;
+error:
+  if (src != NULL)
+    {
+      if (sf != NULL)
+	{
+	  smrlog_munmap (src, sf);
+	}
+      smrlog_destroy (src);
+    }
+  if (dst != NULL)
+    {
+      if (df != NULL)
+	{
+	  smrlog_munmap (dst, df);
+	}
+      smrlog_destroy (dst);
+    }
+  exit (exit_code);
+}
+
 #define is_finalized(m) (m->off == SMR_LOG_NUM_CHECKSUM)
 static void
 verify_checksum (int argc, char *argv[])
@@ -1261,6 +1414,10 @@ main (int argc, char *argv[])
   else if (strcmp (argv[1], "decachelog") == 0)
     {
       decachelog (argc - 2, argv + 2);
+    }
+  else if (strcmp (argv[1], "copylog") == 0)
+    {
+      copylog (argc - 2, argv + 2);
     }
   else if (strcmp (argv[1], "createlog") == 0)
     {

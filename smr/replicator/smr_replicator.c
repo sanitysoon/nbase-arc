@@ -46,7 +46,7 @@ static const char *_usage =
   "    -l <app log file prefix> (default stdout)                                   \n"
   "    -d <smr log file directory path>                                            \n"
   "    -b <base listen port> (default: 1900)                                       \n"
-  "    -x <checkpointed log delete delay in seconds> (default: 86400)              \n"
+  "    -x <checkpointed log delete delay in seconds> (default: 3600)               \n"
   "    -v <verbose level> (0: error, 1: warn, 2: info, 3:debug)  (default 2)       \n";
 
 static const char *_logo =
@@ -147,8 +147,10 @@ static void term_replicator (smrReplicator * rep);
 /* basic event handling */
 /* -------------------- */
 /* master role */
-static int check_client_nid (smrReplicator * rep, short nid, int *duplicated);
-static int check_slave_nid (smrReplicator * rep, short nid, int *duplicated);
+static int check_client_nid (smrReplicator * rep, short nid,
+			     clientConn ** duplicated);
+static int check_slave_nid (smrReplicator * rep, short nid,
+			    slaveConn ** duplicated);
 static int prepare_slaves_for_write (smrReplicator * rep);
 static int seq_compar (const void *v1, const void *v2);
 static int check_publish_seq (smrReplicator * rep, long long rcvd_seq,
@@ -201,6 +203,7 @@ static void local_write_handler (aeEventLoop * el, int fd, void *data,
 /* slave connection */
 /* ---------------- */
 static void free_slave_conn (slaveConn * sc);
+static slaveConn *get_slave_conn_by_nid (smrReplicator * rep, int nid);
 static void free_slave_conn_by_nid (smrReplicator * rep, int nid);
 static int slave_prepare_write (slaveConn * sc);
 static void slave_accept (smrReplicator * rep, aeEventLoop * el, int fd);
@@ -219,6 +222,7 @@ static int slave_send_log (slaveConn * sc);
 /* client connection */
 /* ----------------- */
 static void free_client_conn (clientConn * cc);
+static clientConn *get_client_conn_by_nid (smrReplicator * rep, int nid);
 static void free_client_conn_by_nid (smrReplicator * rep, int nid);
 static int client_prepare_write (clientConn * cc);
 static void client_accept (smrReplicator * rep, aeEventLoop * el, int fd);
@@ -448,7 +452,7 @@ init_replicator (smrReplicator * rep, repRole role, smrLog * smrlog,
   aseq_init (&rep->sync_seq);
   aseq_init (&rep->cron_est_min_seq);
   aseq_init (&rep->mig_seq);
-  rep->log_delete_gap = 86400;
+  rep->log_delete_gap = 3600;
   aseq_init (&rep->log_delete_seq);
   /* general */
   rep->nid = -1;
@@ -625,35 +629,32 @@ term_replicator (smrReplicator * rep)
 }
 
 static int
-check_client_nid (smrReplicator * rep, short nid, int *duplicated)
+check_client_nid (smrReplicator * rep, short nid, clientConn ** duplicated)
 {
-  dlisth *h;
+  clientConn *cc;
 
-  assert (rep != NULL);
+  assert (rep != NULL && duplicated != NULL);
 
   if (nid < 0)
     {
       return -1;
     }
 
-  for (h = rep->clients.next; h != &rep->clients; h = h->next)
+  cc = get_client_conn_by_nid (rep, nid);
+  if (cc != NULL)
     {
-      clientConn *cc = (clientConn *) h;
-      if (cc->nid == nid)
-	{
-	  *duplicated = 1;
-	  return -1;
-	}
+      *duplicated = cc;
+      return -1;
     }
   return 0;
 }
 
 static int
-check_slave_nid (smrReplicator * rep, short nid, int *duplicated)
+check_slave_nid (smrReplicator * rep, short nid, slaveConn ** duplicated)
 {
-  dlisth *h;
+  slaveConn *sc;
 
-  assert (rep != NULL);
+  assert (rep != NULL && duplicated != NULL);
 
   if (nid < 0)
     {
@@ -665,14 +666,11 @@ check_slave_nid (smrReplicator * rep, short nid, int *duplicated)
       return -1;
     }
 
-  for (h = rep->slaves.next; h != &rep->slaves; h = h->next)
+  sc = get_slave_conn_by_nid (rep, nid);
+  if (sc != NULL)
     {
-      slaveConn *sc = (slaveConn *) h;
-      if (sc->nid == nid)
-	{
-	  *duplicated = 1;
-	  return -1;
-	}
+      *duplicated = sc;
+      return -1;
     }
   return 0;
 }
@@ -1584,6 +1582,14 @@ local_accept (smrReplicator * rep, aeEventLoop * el, int fd)
       LOG (LG_INFO, "connection closed %d", cfd);
       return;
     }
+  else if (strcmp (cip, "127.0.0.1") && strcmp (cip, "::1"))
+    {
+      LOG (LG_WARN, "local connection from other than local loopback. ip:%s",
+	   cip);
+      close (cfd);
+      LOG (LG_INFO, "connection closed %d", cfd);
+      return;
+    }
 
   lc = malloc (sizeof (localConn));
   if (lc == NULL)
@@ -1596,6 +1602,7 @@ local_accept (smrReplicator * rep, aeEventLoop * el, int fd)
 
   // after this point goto error
   init_local_conn (lc);
+  strcpy (lc->cip, cip);
   lc->rep = rep;
   lc->fd = cfd;
   lc->ins = io_stream_create (1024);
@@ -1804,25 +1811,31 @@ local_write_handler (aeEventLoop * el, int fd, void *data, int mask)
   applog_leave_session (rep);
 }
 
+static slaveConn *
+get_slave_conn_by_nid (smrReplicator * rep, int nid)
+{
+  dlisth *h;
+
+  for (h = rep->slaves.next; h != &rep->slaves; h = h->next)
+    {
+      slaveConn *sc = (slaveConn *) h;
+      if (sc->nid == nid)
+	{
+	  return sc;
+	}
+    }
+  return NULL;
+}
+
 static void
 free_slave_conn_by_nid (smrReplicator * rep, int nid)
 {
-  dlisth *h;
-  slaveConn *sc = NULL;
+  slaveConn *sc;
 
   assert (rep != NULL);
   assert (nid >= 0);
 
-  for (h = rep->slaves.next; h != &rep->slaves; h = h->next)
-    {
-      sc = (slaveConn *) h;
-      if (sc->nid == nid)
-	{
-	  break;
-	}
-      sc = NULL;
-    }
-
+  sc = get_slave_conn_by_nid (rep, nid);
   if (sc != NULL)
     {
       free_slave_conn (sc);
@@ -1898,7 +1911,7 @@ slave_accept (smrReplicator * rep, aeEventLoop * el, int fd)
   int cfd = 0;
   char *cip = &rep->cip[0];
   int cport;
-  int duplicated = 0;
+  slaveConn *duplicated = NULL;
   long long net_seq;
   long long min_seq = 0LL, commit_seq = 0LL, max_seq = 0LL, log_seq = 0LL;
   int ret;
@@ -1947,6 +1960,7 @@ slave_accept (smrReplicator * rep, aeEventLoop * el, int fd)
       return;
     }
   init_slave_conn (sc);
+  strcpy (sc->cip, cip);
   sc->rep = rep;
   sc->fd = cfd;
   sc->read_cron_count = rep->cron_count;
@@ -1999,7 +2013,7 @@ slave_accept (smrReplicator * rep, aeEventLoop * el, int fd)
   nid = ntohs (net_nid);
   if (check_slave_nid (rep, nid, &duplicated) < 0)
     {
-      if (duplicated)
+      if (duplicated != NULL)
 	{
 	  LOG (LG_WARN, "duplicated slave nid. close current slave: %d", nid);
 	  free_slave_conn_by_nid (rep, nid);
@@ -2329,7 +2343,8 @@ client_accept (smrReplicator * rep, aeEventLoop * el, int fd)
   long long net_seq;
   int ret;
   long long deadline;
-  int duplicated = 0;
+  clientConn *duplicated = NULL;
+  slaveConn *sc;
 
   assert (fd == rep->client_lfd);
 
@@ -2365,6 +2380,7 @@ client_accept (smrReplicator * rep, aeEventLoop * el, int fd)
     }
 
   init_client_conn (cc);
+  strcpy (cc->cip, cip);
   cc->rep = rep;
   cc->fd = cfd;
   cc->ins = io_stream_create (8192);
@@ -2397,9 +2413,25 @@ client_accept (smrReplicator * rep, aeEventLoop * el, int fd)
     }
 
   cc->nid = ntohs (net_nid);
+  // Note: slave follows following connection establish order
+  // 1. connection to master synchronously
+  // 2. notify be a new master ....> client connection occurred
+  // Note: but during migration SRC master connects to DST master using client port
+  sc = get_slave_conn_by_nid (rep, cc->nid);
+  if (sc != NULL)
+    {
+      if (strcmp (sc->cip, cip))
+	{
+	  LOG (LG_WARN,
+	       "slave ip:%s and client ip:%s for a same nid:%d differ",
+	       sc->cip, cip, cc->nid);
+	  goto error;
+	}
+    }
+
   if (check_client_nid (rep, cc->nid, &duplicated) < 0)
     {
-      if (duplicated)
+      if (duplicated != NULL)
 	{
 	  LOG (LG_WARN, "duplicated client nid. close current client: %d",
 	       cc->nid);
@@ -2485,25 +2517,31 @@ free_client_conn (clientConn * cc)
   free (cc);
 }
 
+static clientConn *
+get_client_conn_by_nid (smrReplicator * rep, int nid)
+{
+  dlisth *h;
+
+  for (h = rep->clients.next; h != &rep->clients; h = h->next)
+    {
+      clientConn *cc = (clientConn *) h;
+      if (cc->nid == nid)
+	{
+	  return cc;
+	}
+    }
+  return NULL;
+}
+
 static void
 free_client_conn_by_nid (smrReplicator * rep, int nid)
 {
-  dlisth *h;
-  clientConn *cc = NULL;
+  clientConn *cc;
 
   assert (rep != NULL);
   assert (nid >= 0);
 
-  for (h = rep->clients.next; h != &rep->clients; h = h->next)
-    {
-      cc = (clientConn *) h;
-      if (cc->nid == nid)
-	{
-	  break;
-	}
-      cc = NULL;
-    }
-
+  cc = get_client_conn_by_nid (rep, nid);
   if (cc != NULL)
     {
       free_client_conn (cc);
@@ -3525,9 +3563,9 @@ mgmt_accept (smrReplicator * rep, aeEventLoop * el, int fd)
     }
 
   init_mgmt_conn (conn);
+  strcpy (conn->cip, cip);
   conn->rep = rep;
   conn->fd = cfd;
-  strcpy (conn->cip, cip);
 
   conn->ibuf_p = conn->ibuf = malloc (1024);
   if (conn->ibuf == NULL)
@@ -5295,6 +5333,7 @@ singleton_request (mgmtConn * conn, char **tokens, int num_tok)
 }
 
 #define CONF_SLAVE_IDLE_TIMEOUT_MSEC "slave_idle_timeout_msec"
+#define CONF_LOG_DELETE_GAP "log_delete_gap"
 static int
 confget_request (mgmtConn * conn, char **tokens, int num_tok)
 {
@@ -5309,6 +5348,10 @@ confget_request (mgmtConn * conn, char **tokens, int num_tok)
   if (strcasecmp (tokens[0], CONF_SLAVE_IDLE_TIMEOUT_MSEC) == 0)
     {
       return mgmt_reply_cstring (conn, "+OK %d", rep->slave_idle_to);
+    }
+  else if (strcasecmp (tokens[0], CONF_LOG_DELETE_GAP) == 0)
+    {
+      return mgmt_reply_cstring (conn, "+OK %d", rep->log_delete_gap);
     }
   else
     {
@@ -5347,6 +5390,24 @@ confset_request (mgmtConn * conn, char **tokens, int num_tok)
 	}
 
       rep->slave_idle_to = slave_idle_to;
+      return mgmt_reply_cstring (conn, "+OK");
+    }
+  else if (strcasecmp (tokens[0], CONF_LOG_DELETE_GAP) == 0)
+    {
+      int log_delete_gap;
+
+      if (num_tok != 2)
+	{
+	  goto invalid_arguments;
+	}
+
+      ret = parse_int (tokens[1], &log_delete_gap);
+      if (ret < 0 || log_delete_gap < 0)
+	{
+	  goto invalid_value;
+	}
+
+      rep->log_delete_gap = log_delete_gap;
       return mgmt_reply_cstring (conn, "+OK");
     }
   else

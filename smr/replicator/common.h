@@ -183,6 +183,7 @@ typedef struct localConn
   ioStream *ous;		// stream to backend
   long long consumed_seq;	// sequence number upto which logs are consumed at the backend
   long long sent_seq;		// sequence number upto which logs are notified to the backend
+  char cip[64];
 } localConn;
 #define init_local_conn(c) do {  \
   (c)->rep = NULL;               \
@@ -193,6 +194,7 @@ typedef struct localConn
   (c)->ous = NULL;               \
   (c)->consumed_seq = 0LL;       \
   (c)->sent_seq = 0LL;           \
+  (c)->cip[0] = '\0';            \
 } while(0)
 
 /* replication client connection structure */
@@ -206,6 +208,7 @@ typedef struct clientConn
   long long num_logged;		// total logged bytes from client conn
   ioStream *ins;		// in stream
   ioStream *ous;		// out stream
+  char cip[64];
 } clientConn;
 #define init_client_conn(c) do { \
   (c)->rep = NULL;               \
@@ -216,6 +219,7 @@ typedef struct clientConn
   (c)->num_logged = 0LL;         \
   (c)->ins = NULL;               \
   (c)->ous = NULL;               \
+  (c)->cip[0] = '\0';            \
 } while(0)
 
 /* slave replicator connection structure */
@@ -232,6 +236,7 @@ typedef struct slaveConn
   long long sent_log_seq;	// log sequence number sent to the slave
   logMmapEntry *log_mmap;	// log file mapping
   long long read_cron_count;	// rep->cron_count seen by the read event handler
+  char cip[64];
 } slaveConn;
 #define init_slave_conn(s) do {  \
   dlisth_init(&(s)->head);       \
@@ -245,6 +250,7 @@ typedef struct slaveConn
   (s)->sent_log_seq = 0LL;       \
   (s)->log_mmap = NULL;          \
   (s)->read_cron_count = 0LL;    \
+  (s)->cip[0] = '\0';            \
 } while (0)
 
 /* management connection structure */

@@ -880,6 +880,7 @@ open_timer (smrConnector * conn, int msec)
   int ret;
   struct itimerspec its;
   struct timespec now;
+  long nsec, addsec = 0;
 
   if (conn->tfd != -1)
     {
@@ -893,8 +894,14 @@ open_timer (smrConnector * conn, int msec)
       ERRNO_POINT ();
       return -1;
     }
-  its.it_value.tv_sec = now.tv_sec + (msec / 1000);
-  its.it_value.tv_nsec = now.tv_nsec + (msec % 1000) * 1000000;
+  nsec = now.tv_nsec + (msec % 1000) * 1000000;
+  if (nsec > 1000000000)
+    {
+      addsec = 1;
+      nsec = nsec - 1000000000;
+    }
+  its.it_value.tv_sec = now.tv_sec + (msec / 1000) + addsec;
+  its.it_value.tv_nsec = nsec;
   its.it_interval.tv_sec = (msec / 1000);
   its.it_interval.tv_nsec = (msec % 1000) * 1000000;
 
@@ -974,7 +981,7 @@ change_master (smrConnector * connector)
   /* connect to new master */
   if (master_connect (connector, nm->mhost, nm->mport, nm->nid) == -1)
     {
-      if (open_timer (connector, 1000) < 0)
+      if (open_timer (connector, 1700) < 0)
 	{
 	  ERRNO_POINT ();
 	  return -1;
