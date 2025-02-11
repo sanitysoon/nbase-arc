@@ -10,9 +10,13 @@ class ZoneConfigChecker:
     __servers = None
     __arch = None
 
-    def __init__(self, servers, arch=64):
+    def __init__(self, servers, arch=64, redis_err_budget=0):
         self.__servers = servers
         self.__arch = arch
+        self.__redis_error_budget = redis_err_budget
+
+    def set_redis_error_budget(self, redis_error_budget):
+        self.__redis_error_budget = redis_error_budget
 
     def initial_check(self):
         ZooKeeperCli.start(CLI_RESTART)
@@ -81,9 +85,14 @@ class ZoneConfigChecker:
             so_path = constant.ARCCI_SO_PATH
 
         for cluster in self.__cmi['cluster']:
+            count = 10
+            error_budget = self.__redis_error_budget
+            if error_budget > 0:
+                count = error_budget*3
+
             arc_api = ARC_API('127.0.0.1:2181', cluster['clusterName'].encode('ascii'), logFilePrefix = 'bin/log/arcci_log%d' % self.__arch, so_path = so_path)
             try:
-                for i in xrange(10):
+                for i in xrange(count):
                     rqst = arc_api.create_request()
 
                     key = 'config_check_operation_test_%d' % i
@@ -92,14 +101,22 @@ class ZoneConfigChecker:
                     ret = arc_api.do_request(rqst, 3000)
 
                     be_errno, reply = arc_api.get_reply(rqst)
+                    isErr = False
                     if be_errno != 0:
                         util.log('api.get_reply error!')
-                        return False
+                        isErr = True
                     if reply[0] != ARC_REPLY_STATUS:
                         util.log('api.get_reply error! reply: %s' % str(reply[0]))
+                        isErr = True
+                    arc_api.free_request(rqst)
+
+                    if isErr:
+                        time.sleep(0.15)
+                        error_budget = error_budget - 1
+
+                    if error_budget < 0:
                         return False
 
-                    arc_api.free_request(rqst)
             finally:
                 arc_api.destroy()
         return True

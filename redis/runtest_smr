@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 
 import sys
 import os
@@ -24,7 +24,7 @@ tests = [
     ]
 
 for test in tests:
-    cmd = 'python %s %d' % (test, port)
+    cmd = 'python2 %s %d' % (test, port)
     ret = os.system(cmd)
     if ret == 0:
         print 'test %s passed' % test

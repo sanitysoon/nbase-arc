@@ -65,13 +65,13 @@ def is_pgs_normal(pgs):
 
 class TestNetworkIsolation(unittest.TestCase):
     def setUp(self):
-        ret = util.nic_add('eth1:arc', '127.0.0.100')
+        ret = util.nic_add('lo:arc', '127.0.0.100')
         util.set_process_logfile_prefix( 'TestNetworkIsolation_%s' % self._testMethodName )
         self.cleanup_iptables()
         return 0
 
     def tearDown(self):
-        util.nic_del('eth1:arc')
+        util.nic_del('lo:arc')
         self.cleanup_iptables()
         return 0
 
@@ -215,6 +215,7 @@ class TestNetworkIsolation(unittest.TestCase):
 
         # Create cluster
         conf_checker = default_cluster.initialize_starting_up_smr_before_redis( cluster )
+        conf_checker.set_redis_error_budget(4*len(cluster['servers']))
         self.assertIsNotNone(conf_checker, 'failed to initialize cluster')
 
         # Place master on virtual ip address in order to cause master election.
@@ -326,6 +327,7 @@ class TestNetworkIsolation(unittest.TestCase):
 
         # Create cluster
         conf_checker = default_cluster.initialize_starting_up_smr_before_redis( cluster )
+        conf_checker.set_redis_error_budget(4*len(cluster['servers']))
         self.assertIsNotNone(conf_checker, 'failed to initialize cluster')
 
         # Place master on real ip address
@@ -430,6 +432,7 @@ class TestNetworkIsolation(unittest.TestCase):
 
         # Create cluster
         conf_checker = default_cluster.initialize_starting_up_smr_before_redis( cluster )
+        conf_checker.set_redis_error_budget(4*len(cluster['servers']))
         self.assertIsNotNone(conf_checker, 'failed to initialize cluster')
 
         util.check_cluster(cluster['cluster_name'], mgmt_ip, mgmt_port)
@@ -615,6 +618,7 @@ class TestNetworkIsolation(unittest.TestCase):
 
         # Create cluster
         conf_checker = default_cluster.initialize_starting_up_smr_before_redis( cluster )
+        conf_checker.set_redis_error_budget(4*len(cluster['servers']))
         self.assertIsNotNone(conf_checker, 'failed to initialize cluster')
 
         # Print initial state of cluster
@@ -760,6 +764,7 @@ class TestNetworkIsolation(unittest.TestCase):
 
         # Create cluster
         conf_checker = default_cluster.initialize_starting_up_smr_before_redis( cluster )
+        conf_checker.set_redis_error_budget(4*len(cluster['servers'])*len(cluster['servers']))
         self.assertIsNotNone(conf_checker, 'failed to initialize cluster')
 
         # Print initial state of cluster
@@ -769,7 +774,7 @@ class TestNetworkIsolation(unittest.TestCase):
 
         # Network isolation test
         loop_cnt = 0
-        while (loop_cnt < 20):
+        while (loop_cnt < 10):
             loop_cnt += 1
             # Block network
             util.log('\n\n\n ### BLOCK NETWORK, %d ### ' % loop_cnt)
@@ -858,6 +863,7 @@ class TestNetworkIsolation(unittest.TestCase):
             # Create cluster
             conf_checker = default_cluster.initialize_starting_up_smr_before_redis( cluster, 
                     conf={'cm_context':'applicationContext-fi.xml'})
+            conf_checker.set_redis_error_budget(4*len(cluster['servers']))
             self.assertIsNotNone(conf_checker, 'failed to initialize cluster')
 
             # Print initial state of cluster

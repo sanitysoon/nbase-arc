@@ -22,6 +22,7 @@ import getopt
 import imp
 import sys
 import os
+import re
 import signal
 import default_cluster
 import zookeeper
@@ -197,10 +198,14 @@ def cleanup_test_env(opt_skip_copy_binaries, opt_32bit_binary_test):
 
     return 0
 
-def load_test_modules(opt_32bit_binary_test):
+def load_test_modules(opt_32bit_binary_test, accept=None, deny=None):
     module_list = []
     if 'all' in sys.argv:
         for file_name in os.listdir('.'):
+            if accept != None and re.match(accept, file_name) == None:
+                continue
+            elif deny != None and re.match(deny, file_name) != None:
+                continue
             if file_name.startswith('test_'):
                 if opt_32bit_binary_test and file_name.endswith('32.py'):
                     module_list.append(__import__(file_name[:-3]))
@@ -283,7 +288,8 @@ def main():
 
     # Init options
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'inl:sb', ['init', 'non-interactive', 'backup_log_dir', 'skip-copy_binaries', '32bit-binary-test'])
+        # note A, D options are hidden
+        opts, args = getopt.getopt(sys.argv[1:], 'inl:sbA:D:', ['init', 'non-interactive', 'backup_log_dir', 'skip-copy_binaries', '32bit-binary-test', 'accept-pat', 'deny-pat'])
     except getopt.GetoptError as e:
         print USAGE
         print e
@@ -294,6 +300,9 @@ def main():
     opt_skip_copy_binaries = False
     opt_32bit_binary_test = False
     opt_non_interactive = False
+    accept_pat = None
+    deny_pat = None
+
     for opt, arg in opts:
         if opt in ("-i", '--init'):
             opt_init = True
@@ -305,6 +314,10 @@ def main():
             opt_32bit_binary_test = True
         elif opt in ("-n", '--non-interactive'):
             opt_non_interactive = True
+        elif opt in ("-A", '--accept-pat'):
+            accept_pat = arg
+        elif opt in ("-D", '--deny-pat'):
+            deny_pat = arg
 
     # Clean up test environment
     if cleanup_test_env(opt_skip_copy_binaries, opt_32bit_binary_test) != 0:
@@ -320,7 +333,7 @@ def main():
         return 0
 
     # Load test modules
-    module_list = load_test_modules(opt_32bit_binary_test)
+    module_list = load_test_modules(opt_32bit_binary_test, accept=accept_pat, deny=deny_pat)
     print "module list : "
     print module_list
 

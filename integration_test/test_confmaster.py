@@ -785,7 +785,7 @@ class TestConfMaster(unittest.TestCase):
             leader_cm = cluster['servers'][0]
             gw_servers = map(lambda s: util.deepcopy_server(s), cluster['servers'])
 
-            ret = util.nic_add('eth1:arc', '127.0.0.100')
+            ret = util.nic_add('lo:arc', '127.0.0.100')
             self.assertTrue(ret, 'failed to add virtual network interface.')
 
             conf_checker = default_cluster.initialize_starting_up_smr_before_redis(cluster)
@@ -1342,7 +1342,7 @@ class TestConfMaster(unittest.TestCase):
 
             self.assertTrue(conf_checker.final_check())
         finally:
-            util.nic_del('eth1:arc')
+            util.nic_del('lo:arc')
 
             self.destroy_load_gens(load_gens)
 
@@ -1741,7 +1741,7 @@ class TestConfMaster(unittest.TestCase):
         |     127.0.0.101  <-- remote connection <---|-+                 |
         +--------------------------------------------+-------------------+
         """
-        ret = util.nic_add('eth1:arc0', '127.0.0.100')
+        ret = util.nic_add('lo:arc0', '127.0.0.100')
         self.assertTrue(ret, 'failed to add virtual network interface.')
 
         for i in xrange(0, 3):
@@ -1749,7 +1749,7 @@ class TestConfMaster(unittest.TestCase):
             ret = testbase.request_to_start_gateway(cluster['cluster_name'], s, leader_cm)
             self.assertEqual(ret, 0, 'failed to start gateway. gw=%s:%d' % (s['ip'], s['gateway_port']))
 
-        util.nic_del('eth1:arc0')
+        util.nic_del('lo:arc0')
 
         # Run gateways on 127.0.0.101
         """
@@ -1766,7 +1766,7 @@ class TestConfMaster(unittest.TestCase):
         |     127.0.0.101  <-- local connection  <---|-+                 |
         +--------------------------------------------+-------------------+
         """
-        ret = util.nic_add('eth1:arc1', '127.0.0.101')
+        ret = util.nic_add('lo:arc1', '127.0.0.101')
         self.assertTrue(ret, 'failed to add virtual network interface.')
 
         for i in xrange(3, 6):
@@ -1774,7 +1774,7 @@ class TestConfMaster(unittest.TestCase):
             ret = testbase.request_to_start_gateway(cluster['cluster_name'], s, leader_cm)
             self.assertEqual(ret, 0, 'failed to start gateway. gw=%s:%d' % (s['ip'], s['gateway_port']))
 
-        util.nic_del('eth1:arc1')
+        util.nic_del('lo:arc1')
 
     def test_gw_affinity_hit_ratio(self):
         util.print_frame()
