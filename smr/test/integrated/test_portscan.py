@@ -153,6 +153,10 @@ class TestPortScan (unittest.TestCase):
             pg.join(pgs, start = False)
 
             # ****MASTER here
+            # case sc: None, cc: nid == 0, but not local loopback address
+            ok = self.client_handshake(myip, 1901, b'\x00\x00')
+            assert not ok, ok
+            time.sleep(1.6) # this line matters (SMR_ACCEPT_BLOCK_MSEC 1500)
             # sc: myip, cc: local loopback
             sc = None
             try:

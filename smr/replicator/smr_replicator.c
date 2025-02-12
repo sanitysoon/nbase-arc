@@ -2429,6 +2429,20 @@ client_accept (smrReplicator * rep, aeEventLoop * el, int fd)
 	}
     }
 
+  // client from local back-end
+  if (sc == NULL && cc->nid == rep->nid)
+    {
+      if (strcmp (cip, "127.0.0.1") && strcmp (cip, "::1"))
+	{
+	  // client for myself must be from local loopback? -> Yes
+	  // - role master does not contains external IP of myself. it uses localhost
+	  LOG (LG_WARN,
+	       "client connection must from localhost when my role is master. but from ip:%s",
+	       cip);
+	  goto error;
+	}
+    }
+
   if (check_client_nid (rep, cc->nid, &duplicated) < 0)
     {
       if (duplicated != NULL)

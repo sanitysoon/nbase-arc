@@ -60,6 +60,7 @@ try:
         ret = os.system(cmd)
         if ret == 0:
             print 'test %s passed'  % test
+
         else:
             print 'test %s error %d' % (test, ret)
             sys.exit(-1)
