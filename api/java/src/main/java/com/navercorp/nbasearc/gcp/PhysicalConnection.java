@@ -279,9 +279,12 @@ class PhysicalConnection {
             /* write and flush */
             pendingFlush = true;
 
-            out.retain();
-            ch.writeAndFlush(out).addListener(writeListener);
-            out.release();
+	    try {
+                out.retain();
+                ch.writeAndFlush(out).addListener(writeListener);
+            } finally {
+                out.release();
+	    }
         }
     };
 
