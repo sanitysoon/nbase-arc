@@ -1,27 +1,22 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<!DOCTYPE log4j:configuration PUBLIC "-//LOGGER" "http://logging.apache.org/log4j/1.2/apidocs/org/apache/log4j/xml/doc-files/log4j.dtd">
-<log4j:configuration xmlns:log4j='http://jakarta.apache.org/log4j/'>
+<Configuration>
+  <Appenders>
+    <Console name="console" target="SYSTEM_OUT">
+      <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss} [%-5p](%F:%L) %m%n"/>
+    </Console>
+  </Appenders>
 
-	<!-- appender /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// -->
-	<appender name="console" class="org.apache.log4j.ConsoleAppender">
-		<layout class="org.apache.log4j.PatternLayout">
-			<param name="ConversionPattern" value="%d{yyyy-MM-dd HH:mm:ss} [%-5p](%F:%L) %m%n" />
-		</layout>
-	</appender>
+  <Loggers>
+    <Logger name="com.navercorp.redis.cluster" additivity="false" level="info">
+      <AppenderRef ref="console"/>
+    </Logger>
 
-	<!-- logger ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// -->
-	<logger name="com.navercorp.redis.cluster" additivity="false">
-		<level value="INFO" />
-		<appender-ref ref="console" />
-	</logger>
-	
-	<logger name="com.navercorp.redis.cluster.connection" additivity="false">
-		<level value="INFO" />
-		<appender-ref ref="console" />
-	</logger>
+    <Logger name="com.navercorp.redis.cluster.connection" additivity="false" level="info">
+      <AppenderRef ref="console"/>
+    </Logger>
 
-	<root>
-		<level value="INFO" />
-		<appender-ref ref="console" />
-	</root>
-</log4j:configuration>
+    <Root level="info">
+      <AppenderRef ref="console"/>
+    </Root>
+  </Loggers>
+</Configuration>
